@@ -1,351 +1,201 @@
-'use strict'
-import *  as vscode from 'vscode';
+import *  as vscode from 'vscode'
 
-export default class CodeActionProvider implements vscode.CodeActionProvider{
-    private _commandIds = {
-        ctorFromProperties: 'csharpextensions.ctorFromProperties',
-        initializeMemberFromCtor: 'csharpextensions.initializeMemberFromCtor',
-    };
-    
-    constructor() {         
-        vscode.commands.registerCommand(this._commandIds.initializeMemberFromCtor, this.initializeMemberFromCtor, this);        
-        vscode.commands.registerCommand(this._commandIds.ctorFromProperties, this.executeCtorFromProperties, this);
-    }    
-
-    
-     public provideCodeActions(document:vscode.TextDocument, range: vscode.Range, context: vscode.CodeActionContext, token: vscode.CancellationToken) : vscode.Command[] {
-        var commands = [];
-        
-        let addInitalizeFromCtor = (type:MemberGenerationType)=>{
-            var cmd = this.getInitializeFromCtorCommand(document,range,context,token, type);
-            if(cmd)
-                commands.push(cmd)
-        };
-
-        addInitalizeFromCtor(MemberGenerationType.PrivateField);
-        addInitalizeFromCtor(MemberGenerationType.ReadonlyProperty);
-        addInitalizeFromCtor(MemberGenerationType.Property);
-
-        var ctorPCommand = this.getCtorpCommand(document, range, context, token);
-        if(ctorPCommand)
-            commands.push(ctorPCommand);                
-
-        
-        return commands;  
-    }    
-
-    private camelize(str) {
-        return str.replace(/(?:^\w|[A-Z]|\b\w|\s+)/g, function(match, index) {
-            if (+match === 0) return ""; // or if (/\s+/.test(match)) for white spaces
-            return index == 0 ? match.toLowerCase() : match.toUpperCase();
-        });
-    }
-
-    private executeCtorFromProperties(args:ConstructorFromPropertiesArgument) {        
-        var tabSize = vscode.workspace.getConfiguration().get('editor.tabSize', 4);
-        let ctorParams = [];
-        
-        if(!args.properties)
-            return;
-        
-        args.properties.forEach((p)=>{
-            ctorParams.push(`${p.type} ${this.camelize(p.name)}`)
-        });        
-        
-        let assignments = [];
-        args.properties.forEach((p)=>{
-            assignments.push(`${Array(tabSize*1).join(' ')} this.${p.name} = ${this.camelize(p.name)};
-            `);
-        });
-
-        let firstPropertyLine = args.properties.sort((a,b)=>{
-            return a.lineNumber-b.lineNumber
-        })[0].lineNumber;
-        
-        var ctorStatement = `${Array(tabSize*2).join(' ')} ${args.classDefinition.modifier} ${args.classDefinition.className}(${ctorParams.join(', ')}) 
-        {
-        ${assignments.join('')}   
-        }
-        `;
-
-        let edit = new vscode.WorkspaceEdit();
-        let edits = [];
-
-        let  pos = new vscode.Position(firstPropertyLine, 0);
-        let range = new vscode.Range(pos,pos);
-        let ctorEdit = new vscode.TextEdit(range, ctorStatement);
-
-        edits.push(ctorEdit)
-        edit.set(args.document.uri, edits);
-        
-        let reFormatAfterChange = vscode.workspace.getConfiguration().get('csharpextensions.reFormatAfterChange', true);
-        let applyPromise = vscode.workspace.applyEdit(edit)
-        
-        if(reFormatAfterChange){
-            applyPromise.then(()=>{
-                vscode.commands.executeCommand('vscode.executeFormatDocumentProvider', args.document.uri).then((formattingEdits:vscode.TextEdit[])=>{
-                    var formatEdit = new vscode.WorkspaceEdit();
-                    formatEdit.set(args.document.uri,formattingEdits);
-                    vscode.workspace.applyEdit(formatEdit);    
-                });
-            })
-        }
-    }
-
-    private getCtorpCommand(document:vscode.TextDocument, range: vscode.Range, context: vscode.CodeActionContext, token: vscode.CancellationToken) : vscode.Command {
-        const editor = vscode.window.activeTextEditor;
-        const position = editor.selection.active;
-
-        let withinClass = this.findClassFromLine(document, position.line);
-        if(!withinClass)
-            return null;
-
-        let properties = [];          
-        let lineNo = 0;
-
-        while(lineNo < document.lineCount) {
-            let readonlyRegex = new RegExp(/(public|private|protected)\s(\w+)\s(\w+)\s?{\s?(get;)\s?(private\s)?(set;)?\s?}/g);        
-            let textLine = document.lineAt(lineNo);
-            let match = readonlyRegex.exec(textLine.text);
-                        
-            if(match){
-                let clazz = this.findClassFromLine(document,lineNo);
-                if(clazz.className === withinClass.className) {                
-                    let prop: CSharpPropertyDefinition = {
-                        lineNumber: lineNo,
-                        class: clazz,
-                        modifier: match[1],
-                        type: match[2],
-                        name: match[3],
-                        statement: match[0]
-                    }
-
-                    properties.push(prop);
-                }
-            }
-            lineNo+=1;
-        }
-
-        if(!properties.length)
-            return null;
-
-        var classDefinition = this.findClassFromLine(document, position.line);
-        if(!classDefinition)
-            return;
-
-        var parameter : ConstructorFromPropertiesArgument = {
-            properties: properties,
-            classDefinition: classDefinition,
-            document: document
-        };
-
-        let cmd: vscode.Command = {
-            title: "Initialize ctor from properties...",
-            command: this._commandIds.ctorFromProperties,
-            arguments: [parameter]
-        };
-
-        return cmd;
-    }
-
-    private findClassFromLine(document:vscode.TextDocument, lineNo:number) : CSharpClassDefinition {
-        var classRegex = new RegExp(/(private|internal|public|protected)\s?(static)?\sclass\s(\w*)/g);        
-        while(lineNo > 0){
-            var line = document.lineAt(lineNo);
-            let match;
-            if((match = classRegex.exec(line.text))){                
-                return {
-                    startLine: lineNo,
-                    endLine: -1,
-                    className: match[3],
-                    modifier: match[1],
-                    statement: match[0]
-                };
-            }
-            lineNo -=1;
-        }
-        return null;
-    }
-
-    private initializeMemberFromCtor(args:InitializeFieldFromConstructor) {
-        let edit = new vscode.WorkspaceEdit();
-        
-        var bodyStartRange = new vscode.Range(args.constructorBodyStart, args.constructorBodyStart)
-        var declarationRange = new vscode.Range(args.constructorStart, args.constructorStart);
-        
-        let declarationEdit = new vscode.TextEdit(declarationRange, args.memberGeneration.declaration);
-        let memberInitEdit = new vscode.TextEdit(bodyStartRange, args.memberGeneration.assignment);
-
-        var edits = [];
-        if(args.document.getText().indexOf(args.memberGeneration.declaration.trim()) == -1){
-            edits.push(declarationEdit);
-        }
-        
-        if(args.document.getText().indexOf(args.memberGeneration.assignment.trim())==  -1){
-            edits.push(memberInitEdit);
-        }
-        
-        edit.set(args.document.uri, edits);
-        
-        var reFormatAfterChange = vscode.workspace.getConfiguration().get('csharpextensions.reFormatAfterChange', true);
-        var applyPromise = vscode.workspace.applyEdit(edit);
-
-        if(reFormatAfterChange){
-            applyPromise.then(()=>{
-                vscode.commands.executeCommand('vscode.executeFormatDocumentProvider', args.document.uri).then((formattingEdits:vscode.TextEdit[])=>{
-                    var formatEdit = new vscode.WorkspaceEdit();
-                    formatEdit.set(args.document.uri,formattingEdits);
-                    vscode.workspace.applyEdit(formatEdit);    
-                });
-            })
-        }
-    }
-
-    private getInitializeFromCtorCommand(document:vscode.TextDocument, range: vscode.Range, context: vscode.CodeActionContext, token: vscode.CancellationToken, memberGenerationType: MemberGenerationType ):vscode.Command {
-        const editor = vscode.window.activeTextEditor;        
-        const position = editor.selection.active;
-        var surrounding = document.getText(new vscode.Range(new vscode.Position(position.line-2,0),new vscode.Position(position.line+2,0)));
-        let wordRange = editor.document.getWordRangeAtPosition(position);
-        if(!wordRange)
-            return null;
-
-        var regex = new RegExp(/(public|private|protected)\s(.*?)\(([\s\S]*?)\)/gi);
-        var matches = regex.exec(surrounding);
-        if(!matches)
-            return null;
-
-        var ctorStartPos = editor.document.getText().indexOf(matches[0]);        
-
-        var ctorParamStr = matches[3];
-        let parameters = {};
-        ctorParamStr.split(',').forEach((match)=>{
-            var separated = match.trim().split(' ');
-            var type = separated[0].trim();
-            var name = separated[1].trim();
-            parameters[name] = type;
-        });
-        
-        var lineText = editor.document.getText(new vscode.Range(position.line,0,position.line,wordRange.end.character));
-        var selectedName = lineText.substr(wordRange.start.character,wordRange.end.character-wordRange.start.character);
-        var parameterType  = parameters[selectedName];
-        if(!parameterType){
-            return;
-        }
-        
-        var tabSize = vscode.workspace.getConfiguration().get('editor.tabSize', 4);
-        var privateMemberPrefix = vscode.workspace.getConfiguration().get('csharpextensions.privateMemberPrefix', '');
-        var prefixWithThis = vscode.workspace.getConfiguration().get('csharpextensions.useThisForCtorAssignments', true);
-
-        let memberGeneration:MemberGenerationProperties = null;
-        let title = "";
-        if(memberGenerationType === MemberGenerationType.PrivateField){
-            title = "Initialize field from parameter..."
-            memberGeneration = {
-                type: memberGenerationType,
-                declaration: `${Array(tabSize*2).join(' ')} private readonly ${parameterType} ${privateMemberPrefix}${selectedName};\r\n`,
-                assignment: `${Array(tabSize*3).join(' ')} ${(prefixWithThis?'this.':'')}${privateMemberPrefix}${selectedName} = ${selectedName};\r\n`
-            };
-        } else if( memberGenerationType === MemberGenerationType.ReadonlyProperty){
-            title = "Initialize readonly property from parameter...";
-            var name = selectedName[0].toUpperCase()+selectedName.substr(1);
-            memberGeneration = {
-                type: memberGenerationType,
-                declaration: `${Array(tabSize*2).join(' ')} public ${parameterType} ${name} { get; }\r\n`,
-                assignment: `${Array(tabSize*3).join(' ')} ${(prefixWithThis?'this.':'')}${name} = ${selectedName};\r\n`
-            };
-        } else if( memberGenerationType === MemberGenerationType.Property){
-            title = "Initialize property from parameter...";
-            var name = selectedName[0].toUpperCase()+selectedName.substr(1);
-            memberGeneration = {
-                type: memberGenerationType,
-                declaration: `${Array(tabSize*2).join(' ')} public ${parameterType} ${name} { get;set; }\r\n`,
-                assignment: `${Array(tabSize*3).join(' ')} ${(prefixWithThis?'this.':'')}${name} = ${selectedName};\r\n`
-            };
-        }
-        
-        var parameter:InitializeFieldFromConstructor = {
-            document: document,            
-            type: parameterType,
-            name: selectedName,
-            memberGeneration: memberGeneration,
-            constructorBodyStart: this.findConstructorBodyStart(document,position),
-            constructorStart: this.findConstructorStart(document,position)
-        };                
-                 
-        let cmd: vscode.Command = {
-            title: title,
-            command: this._commandIds.initializeMemberFromCtor,
-            arguments: [parameter]
-        };
-
-        return cmd;
-    }
-
-    private findConstructorBodyStart(document:vscode.TextDocument, position:vscode.Position): vscode.Position {
-        for (var lineNo = position.line; lineNo < position.line+5; lineNo++) {
-            var line = document.lineAt(lineNo);
-            var braceIdx = line.text.indexOf('{');
-            if(braceIdx != -1){
-                return new vscode.Position(lineNo+1,0);
-            }            
-        }
-        return null;        
-    }
-    
-    private findConstructorStart(document:vscode.TextDocument, position:vscode.Position): vscode.Position {
-        var clazz = this.findClassFromLine(document, position.line);
-        
-        for (var lineNo = position.line; lineNo > position.line-5; lineNo--) {
-            var line = document.lineAt(lineNo);
-            if(line.isEmptyOrWhitespace && !(line.lineNumber < clazz.startLine)) {
-                return new vscode.Position(lineNo, 0);
-            }
-        }
-        
-        return new vscode.Position(position.line, 0);
-    }
-}
-
-enum MemberGenerationType {
-    Property,
-    ReadonlyProperty,
-    PrivateField
-}
-
-interface MemberGenerationProperties {
-    type: MemberGenerationType,
-    assignment: string,
-    declaration: string
-}
-
-interface CSharpClassDefinition {
+/** Definition of class/struct. */
+interface CSharpTypeDef {
+    typeName: string,
     startLine: number,
     endLine: number,
-    className: string,
-    modifier: string,
-    statement: string
 }
 
-interface CSharpPropertyDefinition {
-    class: CSharpClassDefinition,
-    modifier: string,
+/** Definitinon of property or field. */
+interface CSharpPropDef {
+    typeDef: CSharpTypeDef,
     type: string,
     name: string,
-    statement: string,
-    lineNumber: number            
+    line: number,
 }
 
-interface ConstructorFromPropertiesArgument {
-    document: vscode.TextDocument,    
-    classDefinition: CSharpClassDefinition,
-    properties: CSharpPropertyDefinition[]
+/** Information for 'generate constructor' command. */
+interface GenCtorArgs {
+    doc: vscode.TextDocument,
+    typeDef: CSharpTypeDef,
+    props: CSharpPropDef[],
+    position: vscode.Position,
 }
 
-interface InitializeFieldFromConstructor {
-    document: vscode.TextDocument,    
-    type:string,
-    name: string,
-    memberGeneration: MemberGenerationProperties,    
-    constructorBodyStart: vscode.Position,
-    constructorStart: vscode.Position,    
+/**
+ * Convert field/property name to parameter name, i.e. lower camel case.
+ */
+const toParameterName = (str: string) => {
+    // Strip the underscore attached for private fields.
+    if (str.startsWith("_")) {
+        str = str.slice(1)
+    }
+
+    return str.replace(/(?:^\w|[A-Z]|\b\w|\s+)/g, (match, index) => {
+        if (+match === 0) return ""; // or if (/\s+/.test(match)) for white spaces
+        return index == 0 ? match.toLowerCase() : match.toUpperCase()
+    })
+}
+
+const matchTextLineWithFieldDecl = (text: string, line: number, typeDef: CSharpTypeDef): CSharpPropDef => {
+    // <modifier>* <type-name> <field-name> ';'
+    const reg = /^\s*(?:(?:public|private|protected|internal|ref|readonly)\s*)*([_\w\d<>., ]+(?<!\s))\s*(\b[\w\d_]+)(?=\s*;)/
+
+    const match = reg.exec(text)
+
+    if (!match) {
+        return null
+    }
+
+    return {
+        typeDef,
+        type: match[1],
+        name: match[2],
+        line,
+    }
+}
+
+const matchTextLineWithPropDecl = (text: string, line: number, typeDef: CSharpTypeDef): CSharpPropDef => {
+    // <modifier>* <type-name> <field-name> !'='
+    const reg = /(?:^\s*(?:public|private|protected|internal|ref|readonly)\s*)*([_\w\d<>., ]+(?<!\s))\s*(\b[\w\d_]+)\s*\{.+get.+\}(?!\s*=)/
+
+    const match = reg.exec(text);
+
+    if (!match) {
+        return null
+    }
+
+    return {
+        typeDef,
+        type: match[1],
+        name: match[2],
+        line: line,
+    }
+}
+
+export default class CodeActionProvider implements vscode.CodeActionProvider {
+    private _commandIds = {
+        genCtor: 'csharp-gen-ctor.ctorFromProperties',
+    }
+
+    constructor() {
+        vscode.commands.registerCommand(this._commandIds.genCtor, this.executeGenCtor, this)
+    }
+
+    public provideCodeActions(document: vscode.TextDocument, range: vscode.Range, context: vscode.CodeActionContext, token: vscode.CancellationToken): vscode.Command[] {
+        const commands = []
+
+        const genCtorCommand = this.genCtorCommand(document, range, context, token)
+        if (genCtorCommand) {
+            commands.push(genCtorCommand)
+        }
+
+        return commands;
+    }
+
+    private executeGenCtor(args: GenCtorArgs) {
+        const ctorParams = args.props.map(p => `${p.type} ${toParameterName(p.name)}`)
+
+        let assignments = args.props.map(p => {
+            const paramName = toParameterName(p.name)
+            const lhs = p.name === paramName ? `this.${p.name}` : p.name
+            return `${lhs} = ${paramName};`
+        })
+
+        var ctorStatement = `public ${args.typeDef.typeName}(${ctorParams.join(', ')})
+        {
+            ${assignments.join("\n            ")}
+        }`;
+
+        let edit = new vscode.WorkspaceEdit()
+        let pos = args.position
+        let range = new vscode.Range(pos, pos)
+        let ctorEdit = new vscode.TextEdit(range, ctorStatement)
+        edit.set(args.doc.uri, [ctorEdit])
+
+        let reFormatAfterChange = vscode.workspace.getConfiguration().get('csharp-gen-ctor.reFormatAfterChange', true)
+        let applyPromise = vscode.workspace.applyEdit(edit)
+
+        if (reFormatAfterChange) {
+            applyPromise.then(() => {
+                vscode.commands.executeCommand('vscode.executeFormatDocumentProvider', args.doc.uri).then((formattingEdits: vscode.TextEdit[]) => {
+                    var formatEdit = new vscode.WorkspaceEdit()
+                    formatEdit.set(args.doc.uri, formattingEdits)
+                    vscode.workspace.applyEdit(formatEdit)
+                })
+            })
+        }
+    }
+
+    private genCtorCommand(doc: vscode.TextDocument, range: vscode.Range, context: vscode.CodeActionContext, token: vscode.CancellationToken): vscode.Command {
+        const editor = vscode.window.activeTextEditor
+        const position = editor.selection.active
+
+        const enclosingTypeDef = this.findTypeDefFromLine(doc, position.line)
+        if (!enclosingTypeDef) {
+            return null
+        }
+
+        const props: CSharpPropDef[] = []
+        let line = enclosingTypeDef.startLine + 1
+
+        while (line < enclosingTypeDef.endLine) {
+            const textLine = doc.lineAt(line)
+            
+            const prop = matchTextLineWithPropDecl(textLine.text, line, enclosingTypeDef)
+            if (prop !== null) {
+                const nearestTypeDef = this.findTypeDefFromLine(doc, line)
+                if (nearestTypeDef && nearestTypeDef.typeName === prop.typeDef.typeName) {
+                    props.push(prop)
+                }
+            }
+
+            const field = matchTextLineWithFieldDecl(textLine.text, line, enclosingTypeDef)
+            if (field !== null) {
+                const nearestTypeDef = this.findTypeDefFromLine(doc, line)
+                if (nearestTypeDef && nearestTypeDef.typeName === field.typeDef.typeName) {
+                    props.push(field)
+                }
+            }
+
+            line += 1
+        }
+
+        if (props.length === 0) {
+            return null
+        }
+
+        const args: GenCtorArgs = {
+            props,
+            typeDef: enclosingTypeDef,
+            doc,
+            position,
+        }
+
+        const cmd: vscode.Command = {
+            title: "Generate constructor from properties",
+            command: this._commandIds.genCtor,
+            arguments: [args]
+        }
+
+        return cmd
+    }
+
+    private findTypeDefFromLine(doc: vscode.TextDocument, line: number): CSharpTypeDef {
+        const typeReg = /^\s*(?:(?:sealed|static|public|private|protected|internal|ref|readonly)\s*)*(?:class|struct)\s*([\w\d_]+)/
+        while (line > 0) {
+            const textLine = doc.lineAt(line)
+            const match = typeReg.exec(textLine.text)
+            if (match) {
+                return {
+                    startLine: line,
+                    endLine: doc.lineCount, // FIXME: find corresponding '}'
+                    typeName: match[1],
+                }
+            }
+            line -= 1
+        }
+        return null
+    }
 }
