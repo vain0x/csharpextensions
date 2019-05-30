@@ -76,7 +76,7 @@ const matchTextLineWithPropDecl = (text: string, line: number, typeDef: CSharpTy
 
 export default class CodeActionProvider implements vscode.CodeActionProvider {
     private _commandIds = {
-        genCtor: 'csharpextensions.ctorFromProperties',
+        genCtor: 'csharp-gen-ctor.ctorFromProperties',
     }
 
     constructor() {
@@ -114,7 +114,7 @@ export default class CodeActionProvider implements vscode.CodeActionProvider {
         let ctorEdit = new vscode.TextEdit(range, ctorStatement)
         edit.set(args.doc.uri, [ctorEdit])
 
-        let reFormatAfterChange = vscode.workspace.getConfiguration().get('csharpextensions.reFormatAfterChange', true)
+        let reFormatAfterChange = vscode.workspace.getConfiguration().get('csharp-gen-ctor.reFormatAfterChange', true)
         let applyPromise = vscode.workspace.applyEdit(edit)
 
         if (reFormatAfterChange) {
