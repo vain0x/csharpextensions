@@ -13,11 +13,7 @@ namespace MySample
 
         private readonly string _bar;
 
-        public Hoge(int foo, string bar)
-        {
-            Foo = foo;
-            _bar = bar;
-        }
+        /* cursor here */
     }
 }
 ```
@@ -46,3 +42,5 @@ namespace MySample
     - Support `sealed class` and `struct`
     - Not generate assignments for fields/proeprties with initializer
     - Alway generate `public` constructor
+- Known issues
+    - Not support inline types
