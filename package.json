@@ -17,34 +17,10 @@
         "Snippets"
     ],
     "activationEvents": [
-        "onLanguage:csharp",
-        "onCommand:csharpextensions.createClass",
-        "onCommand:csharpextensions.createInterface"
+        "onLanguage:csharp"
     ],
     "main": "./out/src/extension",
     "contributes": {
-        "commands": [
-            {
-                "command": "csharpextensions.createClass",
-                "title": "New C# Class"
-            },
-            {
-                "command": "csharpextensions.createInterface",
-                "title": "New C# Interface"
-            }
-        ],
-        "menus": {
-            "explorer/context": [
-                {
-                    "group": "navigation@-1",
-                    "command": "csharpextensions.createClass"
-                },
-                {
-                    "group": "navigation@-1",
-                    "command": "csharpextensions.createInterface"
-                }
-            ]
-        },
         "configuration": {
             "title": "C# Extensions configuration",
             "properties": {
