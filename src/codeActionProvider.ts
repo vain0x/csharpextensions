@@ -183,7 +183,7 @@ export default class CodeActionProvider implements vscode.CodeActionProvider {
     }
 
     private findTypeDefFromLine(doc: vscode.TextDocument, line: number): CSharpTypeDef {
-        const typeReg = /^\s*(?:(?:sealed|static|public|private|protected|internal|ref|readonly)\s*)*(?:class|struct)\s*([\w\d_]+)/
+        const typeReg = /^\s*(?:(?:abstract|sealed|static|public|private|protected|internal|ref|readonly)\s*)*(?:class|struct)\s*([\w\d_]+)/
         while (line > 0) {
             const textLine = doc.lineAt(line)
             const match = typeReg.exec(textLine.text)
