@@ -1,41 +1,48 @@
-# ***** *PROJECT NO LONGER UNDER DEVELOPMENT* *****
+# C# Constructor Generator for VSCode
 
-# C# Extensions
+## Example
 
-Welcome to C# Extensions.  This VSCode extension provides extensions to the IDE that will hopefully speed up your development workflow.
+From:
 
-## Features
+```csharp
+namespace MySample
+{
+    class Hoge
+    {
+        public int Foo { get; }
 
-**Add C# Class**
+        private readonly string _bar;
 
-![Add C# Class](./featureimages/newclass.gif)
+        public Hoge(int foo, string bar)
+        {
+            Foo = foo;
+            _bar = bar;
+        }
+    }
+}
+```
 
-**Add C# Interface**
+To:
 
-![Add C# Interface](./featureimages/newinterface.gif)
+```csharp
+namespace MySample
+{
+    class Hoge
+    {
+        public int Foo { get; }
 
-**Add fields from constructors**
+        private readonly string _bar;
 
-![Add fields from constructors](./featureimages/fieldfromctor.gif)
+        public Hoge(int foo, string bar)
+        {
+            Foo = foo;
+            _bar = bar;
+        }
+    }
+}
+```
 
-**Add constructor from properties**
-
-![Add constructor from properties](./featureimages/ctorfromprop.gif)
-
-**Add read-only property from constructors**
-![Add read-only property from constructors](./featureimages/propfromctor.gif)
-
-**Add property from constructors**
-![Add property from constructors](./featureimages/fullpropfromctor.gif)
-
-
-This extension traverses up the folder tree to find the project.json or *.csproj and uses that as the parent folder to determine namespaces.
-
-
------------------------------------------------------------------------------------------------------------
-
-## Licence 
-
-MIT  
-
-See [licence.txt](./licence.txt)
+- Different from [csharpextensions](https://github.com/jchannon/csharpextensions):
+    - Support `sealed class` and `struct`
+    - Not generate assignments for fields/proeprties with initializer
+    - Alway generate `public` constructor
